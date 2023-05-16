@@ -49,7 +49,7 @@ func main() {
 	fmt.Printf("Manifest %v\n", dokcerManifest)
 
 	// 1. create a temp dir
-	tempDirPath, err := ioutil.TempDir("", "")
+	tempDirPath, err := ioutil.TempDir("/tmp", "ccf-")
 	handleErr("tempdir", err)
 
 	// 2. copy binary being executed
@@ -77,24 +77,29 @@ func main() {
 	//	application/vnd.oci.image.index.v1+json
 	//	2
 	//}
+
+	folder := dockerClient.imageName
+	os.MkdirAll(folder, os.ModeDir)
+
 	for _, manifest := range dokcerManifest.Manifests {
 		if dokcerManifest.SchemaVersion == 2 {
 			digestManifest, err := dockerClient.DigestManifestFile(manifest)
 			handleErr("DigestManifestFile", err)
 			fmt.Printf("digestManifest - %v\n", digestManifest)
 			for _, layer := range digestManifest.Layers {
-				err := dockerClient.PullLayer(layer)
+				err := dockerClient.PullLayer(folder, layer)
 				handleErr("Pull V2 layer", err)
-				folder := dockerClient.imageName + "_" + layer.Digest
-				dir, err := ioutil.ReadDir(folder)
-				handleErr("", err)
-				fmt.Printf("tmpdir = %v\n", tempDirPath)
-				fmt.Printf("dir %v\n", dir[0].Name())
-				time.Sleep(60 * time.Second)
 			}
-
 		}
 	}
+
+	dirs, err := ioutil.ReadDir(folder)
+	handleErr("", err)
+	fmt.Printf("tmpdir = %v\n", tempDirPath)
+	for _, dir := range dirs {
+		fmt.Printf("dir = %v\n", dir.Name())
+	}
+	time.Sleep(1 * time.Second)
 	cmd := exec.Command(command, args...)
 	//cmd.Stdin = os.Stdin // to ensure no err on cmd.Run()
 
@@ -255,7 +260,7 @@ func (dockerClient DokcerClient) DigestManifestFile(manifest Manifest) (V2Digest
 	return result, nil
 }
 
-func (dockerClient DokcerClient) PullLayer(layer Layer) error {
+func (dockerClient DokcerClient) PullLayer(folder string, layer Layer) error {
 	//GET /v2/<name>/blobs/<digest>
 	fmt.Printf("Pulling layer :%v\n", layer.Digest)
 	req, err := http.NewRequest("GET", "https://registry.hub.docker.com/v2/"+dockerClient.imageName+"/blobs/"+layer.Digest, nil)
@@ -280,9 +285,6 @@ func (dockerClient DokcerClient) PullLayer(layer Layer) error {
 
 	// Create a tar reader
 	tarReader := tar.NewReader(gzipReader)
-
-	folder := dockerClient.imageName + "_" + layer.Digest
-	os.MkdirAll(folder, os.ModeDir)
 
 	// Extract files from the archive
 	for {
