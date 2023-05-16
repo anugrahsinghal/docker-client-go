@@ -1,3 +1,5 @@
+//go:build linux
+
 package main
 
 import (
@@ -33,12 +35,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// 3. chroot to temp dir
-	if err := syscall.Chroot(tempDirPath); err != nil {
-		fmt.Printf("Chroot - Err: %v", err)
-		os.Exit(1)
-	}
-
 	fmt.Printf("Args: %v\n", os.Args)
 
 	cmd := exec.Command(command, args...)
@@ -46,6 +42,11 @@ func main() {
 
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Chroot:     tempDirPath,
+		Cloneflags: syscall.CLONE_NEWPID,
+	}
 
 	if err := cmd.Run(); err != nil {
 		exitErr, ok := err.(*exec.ExitError)
