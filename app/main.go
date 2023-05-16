@@ -20,11 +20,13 @@ func main() {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	err := cmd.Run()
-
-	if err != nil {
-		fmt.Printf("Err: %v", err)
-		os.Exit(1)
+	if err := cmd.Run(); err != nil {
+		exitErr, ok := err.(*exec.ExitError)
+		if ok {
+			// access fields of exitErr here
+			fmt.Printf("Err: %v", exitErr)
+			os.Exit(exitErr.ExitCode())
+		}
 	}
 
 	// Your task is to implement a very basic version of docker run. It will be executed similar to docker run:
