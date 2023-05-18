@@ -11,7 +11,9 @@ uses linux system calls
 to create a seprate enviroment
 cgroups are helpful here: they help isolate/limit resource usage between 2 env
 
-a container is basically a full blown linux FS mounted at a different folder and nothing else ?
+oversimplification:
+> a container is basically a full blown linux FS mounted at a different folder and nothing else ?
+> with certain syscalls stacked to isolate process, namespaces, network etcdone using syscalls
 
 - layers are  tar files
 they stack on top of each other
@@ -91,7 +93,7 @@ func main() {
 	// }
 
 	// 3. chroot to temp dir
-	handleErr("Chroot - Err:", syscall.Chroot(tempDirPath))
+	handleErr("Chroot", syscall.Chroot(tempDirPath))
 
 	cmd := exec.Command(command, args...)
 	// cmd.Stdin = os.Stdin // to ensure no err on cmd.Run()
