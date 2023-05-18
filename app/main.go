@@ -66,15 +66,18 @@ func main() {
 
 	// ubunut:latest
 	if imageIndexFile.SchemaVersion == 2 {
-		v2digestManifest, err := dockerClient.DigestManifestFile(imageIndexFile.Manifests[0].Digest, imageIndexFile.Manifests[0].MediaType)
+		v2digestManifest, err := dockerClient.DigestManifestFile(
+			imageIndexFile.Manifests[0].Digest, imageIndexFile.Manifests[0].MediaType,
+		)
 		handleErr("DigestManifestFile", err)
-		fmt.Printf("digestManifest - %v\n", v2digestManifest)
+
 		// pull layer into given folder
 		for _, layer := range v2digestManifest.Layers {
 			err := dockerClient.PullAndExtractLayer(tempDirPath, layer.Digest, layer.MediaType)
 			handleErr("Pull V2 layer", err)
 		}
 	} else if imageIndexFile.SchemaVersion == 1 {
+		// pull layer into given folder
 		for _, layer := range imageIndexFile.FSLayers {
 			err := dockerClient.PullAndExtractLayer(tempDirPath, layer.BlobSum, "")
 			handleErr("Pull V2 layer", err)
