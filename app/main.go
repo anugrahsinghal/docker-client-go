@@ -70,42 +70,38 @@ func main() {
 	tempDirPath, err := ioutil.TempDir("", "")
 	handleErr("tempdir", err)
 
-	// 2. copy binary being executed
-	// err = copyCommandExecutableToTempDir(tempDirPath, command)
-	// handleErr("copyCommandExecutableToTempDir", err)
+	fmt.Printf("Args: %v\n", os.Args)
+
+	// dirs, err := ioutil.ReadDir(tempDirPath)
+	// handleErr("", err)
+	// fmt.Printf("Before extract tmpdir = %v\n", tempDirPath)
+	// for _, file := range dirs {
+	// 	fmt.Printf("file = name = %v , isDir = %v\n", file.Name(), file.IsDir())
+
+	// }
+
+	if imageIndexFile.SchemaVersion == 2 {
+		v2digestManifest, err := dockerClient.DigestManifestFile(imageIndexFile.Manifests[0])
+		handleErr("DigestManifestFile", err)
+		fmt.Printf("digestManifest - %v\n", v2digestManifest)
+		// pull layer into given folder
+		for _, layer := range v2digestManifest.Layers {
+			err := dockerClient.PullAndExtractLayer(tempDirPath, layer)
+			handleErr("Pull V2 layer", err)
+		}
+	}
+
+	// 2.create null file in dev folder for cmd to execute
 	err = createDevNull(tempDirPath)
 	handleErr("createDevNull", err)
 
-	fmt.Printf("Args: %v\n", os.Args)
-
-	// create folder to store layers
-	// folder := dockerClient.imageName
-	// os.MkdirAll(folder, os.ModeDir)
-
-	if imageIndexFile.SchemaVersion == 2 {
-		// for _, manifest := range imageIndexFile.Manifests {
-			// get 	manifest
-			v2digestManifest, err := dockerClient.DigestManifestFile(imageIndexFile.Manifests[0])
-			handleErr("DigestManifestFile", err)
-			fmt.Printf("digestManifest - %v\n", v2digestManifest)
-			// pull layer into given folder
-			for _, layer := range v2digestManifest.Layers {
-				err := dockerClient.PullAndExtractLayer(tempDirPath, layer)
-				handleErr("Pull V2 layer", err)
-			}
-		// }
-		// alpine:latest
-	}
-
-	dirs, err := ioutil.ReadDir(tempDirPath)
-	handleErr("", err)
-	fmt.Printf("tmpdir = %v\n", tempDirPath)
-	for _, file := range dirs {
-		fmt.Printf("file = name = %v , isDir = %v\n", file.Name(), file.IsDir())
-
-	}
-	cmd2 := exec.Command("tree", tempDirPath)
-	handleErr("tree",cmd2.Run())
+	// dirs, err := ioutil.ReadDir(tempDirPath)
+	// dirs, err = ioutil.ReadDir(tempDirPath)
+	// handleErr("", err)
+	// fmt.Printf("After Extraction tmpdir = %v\n", tempDirPath)
+	// for _, file := range dirs {
+	// 	fmt.Printf("file = name = %v , isDir = %v\n", file.Name(), file.IsDir())
+	// }
 
 	// time.Sleep(1 * time.Second)
 	// dirs, err = ioutil.ReadDir(tempDirPath)
@@ -159,7 +155,7 @@ func getImageInfo(dockerImage string) (string, string) {
 	image := strings.Split(dockerImage, ":")
 	imageName := "library/" + image[0]
 	imageTag := image[1]
-	fmt.Printf("Docker %v", image)
+	fmt.Printf("Docker %v\n", image)
 	return imageName, imageTag
 }
 
@@ -167,19 +163,19 @@ func copyCommandExecutableToTempDir(tempDirPath string, command string) error {
 	sourceFile := command
 	input, err := ioutil.ReadFile(sourceFile)
 	if err != nil {
-		fmt.Printf("read - Err: %v", err)
+		fmt.Printf("read - Err: %v\n", err)
 		return err
 	}
 
 	destinationFile := path.Join(tempDirPath, sourceFile)
 	err = os.MkdirAll(tempDirPath+"/usr/local/bin", os.ModeDir)
 	if err != nil {
-		fmt.Printf("MkdirAll - Err: %v", err)
+		fmt.Printf("MkdirAll - Err: %v\n", err)
 		return err
 	}
 	err = ioutil.WriteFile(destinationFile, input, os.ModePerm)
 	if err != nil {
-		fmt.Printf("write - Err: %v", err)
+		fmt.Printf("write - Err: %v\n", err)
 		return err
 	}
 
@@ -254,9 +250,7 @@ func (dockerClient DokcerClient) ImageIndexFile() (DokcerManifest, error) {
 		return DokcerManifest{}, err
 	}
 
-	var result2 interface{}
-	err = json.Unmarshal(body, &result2)
-	fmt.Printf("index file %v\n", result2)
+	fmt.Printf("index file %v\n", string(body))
 
 	return result, nil
 }
@@ -288,29 +282,7 @@ func (dockerClient DokcerClient) DigestManifestFile(manifest Manifest) (V2Digest
 	return result, nil
 }
 
-// func downloadFile(req *http.Request, outFn string) (string, error) {
-// 	resp, err := http.DefaultClient.Do(req)
-// 	if err != nil {
-// 		return "", err
-// 	}
-// 	if resp.StatusCode == 307 {
-// 		return resp.Header.Get("Location"), nil
-// 	} else if resp.StatusCode != 200 {
-// 		return "", fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-// 	}
-// 	out, err := os.Create(outFn)
-// 	if err != nil {
-// 		return "", err
-// 	}
-// 	defer out.Close()
-// 	_, err = io.Copy(out, resp.Body)
-// 	if err != nil {
-// 		return "", err
-// 	}
-// 	return "", nil
-// }
-
-func (dockerClient DokcerClient) PullAndExtractLayer(tmpDir string, layer Layer) error {
+func (dockerClient DokcerClient) PullAndExtractLayer(tempDirPath string, layer Layer) error {
 	//GET /v2/<name>/blobs/<digest>
 	fmt.Printf("Pulling layer :%v\n", layer.Digest)
 	req, err := http.NewRequest("GET", "https://registry.hub.docker.com/v2/"+dockerClient.imageName+"/blobs/"+layer.Digest, nil)
@@ -342,7 +314,7 @@ func (dockerClient DokcerClient) PullAndExtractLayer(tmpDir string, layer Layer)
 
 	// extract file
 	fmt.Printf("Extracting layer :%v\n", layer.Digest)
-	cmd := exec.Command("tar", "-xzf", (hash + ".tar.gz"), "-C", tmpDir)
+	cmd := exec.Command("tar", "-xzf", (hash + ".tar.gz"), "-C", tempDirPath)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -423,14 +395,13 @@ type Layer struct {
 //schemaVersion:2
 //]
 
-
 /*//
 map[
-	architecture:amd64 
+	architecture:amd64
 	fsLayers:[
-		map[blobSum:sha256:a3ed95caeb02ffe68cdd9fd84406680ae93d633cb16422d00e8a7c22955b46d4] 
+		map[blobSum:sha256:a3ed95caeb02ffe68cdd9fd84406680ae93d633cb16422d00e8a7c22955b46d4]
 		map[blobSum:sha256:8a49fdb3b6a5ff2bd8ec6a86c05b2922a0f7454579ecc07637e94dfd1d0639b6]
-	] 
+	]
 	history:[
 		map[
 			v1Compatibility:{
@@ -443,29 +414,29 @@ map[
 				"Cmd":["/bin/sh","-c","#(nop) ","CMD [\"/bin/sh\"]"],
 				"Image":"sha256:fa9de512065d701938f44d4776827d838440ed00f1f51b1fff5f97f7378acf08","Volumes":null,"WorkingDir":"","Entrypoint":null,"OnBuild":null,"Labels":{}},"created":"2023-05-09T23:11:10.132147526Z","docker_version":"20.10.23","id":"9b53e1d18b8ca6d05f261f41688f674879603cd2160c4e9ded4c7a7b93baa591","os":"linux","parent":"149414ad771db6217a7e94adc1a8a85f96ba1b8a7deed38f48f22ee1b82e459b","throwaway":true
 			}
-			] 
+			]
 			map[v1Compatibility:{"id":"149414ad771db6217a7e94adc1a8a85f96ba1b8a7deed38f48f22ee1b82e459b","created":"2023-05-09T23:11:10.007217553Z","container_config":{"Cmd":["/bin/sh -c #(nop) ADD file:7625ddfd589fb824ee39f1b1eb387b98f3676420ff52f26eb9d975151e889667 in / "
 			]
 		}
 		}
 			]
-			] 
-			name:library/alpine 
-			schemaVersion:1 
+			]
+			name:library/alpine
+			schemaVersion:1
 			signatures:[
 				map[
 					header:
 						map[
-							alg:ES256 
+							alg:ES256
 							jwk:map[
-								crv:P-256 kid:BR2Q:AY3C:FBW6:BKZX:2OP5:I36Z:GDVY:LN4Z:G46A:SWRR:E6WI:4WPZ 
-								kty:EC x:5_jwPOuG8WJAm500LT3L9jkac-EjOiyNoh8f0tLSp90 
+								crv:P-256 kid:BR2Q:AY3C:FBW6:BKZX:2OP5:I36Z:GDVY:LN4Z:G46A:SWRR:E6WI:4WPZ
+								kty:EC x:5_jwPOuG8WJAm500LT3L9jkac-EjOiyNoh8f0tLSp90
 								y:nU_snnb7XAYRYmgZZypZRj78pIS19JnKxU0eqxH4Pjg
 							]
-			] 
-			protected:eyJmb3JtYXRMZW5ndGgiOjIwOTcsImZvcm1hdFRhaWwiOiJDbjAiLCJ0aW1lIjoiMjAyMy0wNS0xOFQwOTozMzoyNVoifQ 
+			]
+			protected:eyJmb3JtYXRMZW5ndGgiOjIwOTcsImZvcm1hdFRhaWwiOiJDbjAiLCJ0aW1lIjoiMjAyMy0wNS0xOFQwOTozMzoyNVoifQ
 			signature:HZezbpU8ktl1aQIQY2FlYLv_0aDxu22goSUIDPwXyvFeYbgXaAh6KiqCuzVYx8-cn4K0IceE70d0oIdnZ89q-A]
-	] 
-		
+	]
+
 	tag:latest]
 //*/
