@@ -27,7 +27,6 @@ because since the TAR is already present, does not need to send again
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"net/http"
 	"os"
@@ -52,8 +51,12 @@ func main() {
 	dockerImage := os.Args[2]
 	command := os.Args[3]
 	args := os.Args[4:len(os.Args)]
-	fmt.Println("command " + command)
-	fmt.Printf("args %v \n", args)
+
+	fmt.Printf("All Args: %v\n Command %v\n Command Args %v\n ", os.Args, command, args)
+
+	// 1. create a temp dir
+	tempDirPath, err := ioutil.TempDir("", "")
+	handleErr("tempdir", err)
 
 	imageName, imageTag := getImageInfo(dockerImage)
 
@@ -65,51 +68,12 @@ func main() {
 
 	token, err := dockerClient.AuthToken()
 	handleErr("Auth", err)
-
 	dockerClient.token = token
 
-	// index file
-	imageIndexFile, err := dockerClient.ImageIndexFile()
-
-	handleErr("Docker Manifest", err)
-	fmt.Printf("Manifest %v\n", imageIndexFile)
-
-	// 1. create a temp dir
-	tempDirPath, err := ioutil.TempDir("", "")
-	handleErr("tempdir", err)
-
-	fmt.Printf("Args: %v\n", os.Args)
-
-	// dirs, err := ioutil.ReadDir(tempDirPath)
-	// handleErr("", err)
-	// fmt.Printf("Before extract tmpdir = %v\n", tempDirPath)
-	// for _, file := range dirs {
-	// 	fmt.Printf("file = name = %v , isDir = %v\n", file.Name(), file.IsDir())
-	// }
-
-	// ubunut:latest
-	if imageIndexFile.SchemaVersion == 2 {
-		v2digestManifest, err := dockerClient.DigestManifestFile(
-			imageIndexFile.Manifests[0].Digest, imageIndexFile.Manifests[0].MediaType,
-		)
-		handleErr("DigestManifestFile", err)
-
-		// pull layer into given folder
-		for _, layer := range v2digestManifest.Layers {
-			err := dockerClient.PullAndExtractLayer(tempDirPath, layer.Digest, layer.MediaType)
-			handleErr("Pull V2 layer", err)
-		}
-	} else if imageIndexFile.SchemaVersion == 1 {
-		// pull layer into given folder
-		for _, layer := range imageIndexFile.FSLayers {
-			err := dockerClient.PullAndExtractLayer(tempDirPath, layer.BlobSum, "")
-			handleErr("Pull V2 layer", err)
-		}
-	}
+	dockerClient.pullContainerImage(tempDirPath)
 
 	// 2.create null file in dev folder for cmd to execute
-	err = createDevNull(tempDirPath)
-	handleErr("createDevNull", err)
+	handleErr("createDevNull", createDevNull(tempDirPath))
 
 	// dirs, err := ioutil.ReadDir(tempDirPath)
 	// dirs, err = ioutil.ReadDir(tempDirPath)
@@ -118,7 +82,6 @@ func main() {
 	// for _, file := range dirs {
 	// 	fmt.Printf("file = name = %v , isDir = %v\n", file.Name(), file.IsDir())
 	// }
-
 	// time.Sleep(1 * time.Second)
 
 	// dirs, err = ioutil.ReadDir(tempDirPath)
@@ -128,12 +91,7 @@ func main() {
 	// }
 
 	// 3. chroot to temp dir
-	if err := syscall.Chroot(tempDirPath); err != nil {
-		fmt.Printf("Chroot - Err: %v\n", err)
-		os.Exit(1)
-	}
-
-	// handleErr("chdir", syscall.Chdir("/"))
+	handleErr("Chroot - Err:", syscall.Chroot(tempDirPath))
 
 	cmd := exec.Command(command, args...)
 	// cmd.Stdin = os.Stdin // to ensure no err on cmd.Run()
@@ -166,6 +124,38 @@ func main() {
 	//
 	//fmt.Println(string(output))
 
+}
+
+func (dockerClient DokcerClient) pullContainerImage(tempDirPath string) {
+	// index file
+	imageIndexFile, err := dockerClient.ImageIndexFile()
+	handleErr("Docker Image Index", err)
+
+	// dirs, err := ioutil.ReadDir(tempDirPath)
+	// handleErr("", err)
+	// fmt.Printf("Before extract tmpdir = %v\n", tempDirPath)
+	// for _, file := range dirs {
+	// 	fmt.Printf("file = name = %v , isDir = %v\n", file.Name(), file.IsDir())
+	// }
+
+	if imageIndexFile.SchemaVersion == 1 {
+		for _, layer := range imageIndexFile.FSLayers {
+			err := dockerClient.PullAndExtractLayer(tempDirPath, layer.BlobSum, "")
+			handleErr("Pull V1 layer", err)
+		}
+	} else if imageIndexFile.SchemaVersion == 2 {
+		// ubuntu:latest
+		v2digestManifest, err := dockerClient.DigestManifestFile(
+			imageIndexFile.Manifests[0].Digest, imageIndexFile.Manifests[0].MediaType,
+		)
+		handleErr("DigestManifestFile", err)
+
+		// pull layer into given folder
+		for _, layer := range v2digestManifest.Layers {
+			err := dockerClient.PullAndExtractLayer(tempDirPath, layer.Digest, layer.MediaType)
+			handleErr("Pull V2 layer", err)
+		}
+	}
 }
 
 func getImageInfo(dockerImage string) (string, string) {
@@ -280,44 +270,26 @@ func (dockerClient DokcerClient) DigestManifestFile(digest, mediaType string) (V
 func (dockerClient DokcerClient) PullAndExtractLayer(tempDirPath, layerDigest, mediaType string) error {
 	//GET /v2/<name>/blobs/<digest>
 	fmt.Printf("Pulling layer :%v\n", layerDigest)
-	req, err := http.NewRequest("GET", "https://registry.hub.docker.com/v2/"+dockerClient.imageName+"/blobs/"+layerDigest, nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Add("Authorization", "Bearer "+dockerClient.token)
-	req.Header.Add("Accept", mediaType)
+	body, err := doGet(dockerClient, "https://registry.hub.docker.com/v2/"+dockerClient.imageName+"/blobs/"+layerDigest, mediaType)
+	fileName := strings.Split(layerDigest, ":")[1] + ".tar.gz"
 
-	// download layer
-	resp, err := dockerClient.httpClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	hash := strings.Split(layerDigest, ":")[1]
-
-	file, err := os.Create(hash + ".tar.gz")
-
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	_, err = io.Copy(file, resp.Body)
+	// won't do a buffered write, but I am ok with that for my toy usecase
+	err = ioutil.WriteFile(fileName, body, os.ModePerm)
 	if err != nil {
 		return err
 	}
 
 	// extract file
 	fmt.Printf("Extracting layer :%v\n", layerDigest)
-	cmd := exec.Command("tar", "-xzf", (hash + ".tar.gz"), "-C", tempDirPath)
+	cmd := exec.Command("tar", "-xzf", fileName, "-C", tempDirPath)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		return err
 	}
-	return nil
 
+	return nil
 }
 
 func doGet(dockerClient DokcerClient, uri string, mediaType string) ([]byte, error) {
