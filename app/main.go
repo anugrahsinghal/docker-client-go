@@ -22,6 +22,8 @@ func handleErr(msg string, err error) {
 	}
 }
 
+// mydocker run ubuntu:latest /usr/local/bin/docker-explorer echo hey
+// mydocker run ubuntu:latest /bin/echo hey
 // Usage: your_docker.sh run <image> <command> <arg1> <arg2> ...
 func main() {
 	dockerImage := os.Args[2]
@@ -55,13 +57,26 @@ func main() {
 
 	fmt.Printf("Args: %v\n", os.Args)
 
+	// dirs, err := ioutil.ReadDir(tempDirPath)
+	// handleErr("", err)
+	// fmt.Printf("Before extract tmpdir = %v\n", tempDirPath)
+	// for _, file := range dirs {
+	// 	fmt.Printf("file = name = %v , isDir = %v\n", file.Name(), file.IsDir())
+	// }
+
+	// ubunut:latest
 	if imageIndexFile.SchemaVersion == 2 {
-		v2digestManifest, err := dockerClient.DigestManifestFile(imageIndexFile.Manifests[0])
+		v2digestManifest, err := dockerClient.DigestManifestFile(imageIndexFile.Manifests[0].Digest, imageIndexFile.Manifests[0].MediaType)
 		handleErr("DigestManifestFile", err)
 		fmt.Printf("digestManifest - %v\n", v2digestManifest)
 		// pull layer into given folder
 		for _, layer := range v2digestManifest.Layers {
-			err := dockerClient.PullAndExtractLayer(tempDirPath, layer)
+			err := dockerClient.PullAndExtractLayer(tempDirPath, layer.Digest, layer.MediaType)
+			handleErr("Pull V2 layer", err)
+		}
+	} else if imageIndexFile.SchemaVersion == 1 {
+		for _, layer := range imageIndexFile.FSLayers {
+			err := dockerClient.PullAndExtractLayer(tempDirPath, layer.BlobSum, "")
 			handleErr("Pull V2 layer", err)
 		}
 	}
@@ -70,12 +85,29 @@ func main() {
 	err = createDevNull(tempDirPath)
 	handleErr("createDevNull", err)
 
+	// dirs, err := ioutil.ReadDir(tempDirPath)
+	// dirs, err = ioutil.ReadDir(tempDirPath)
+	// handleErr("", err)
+	// fmt.Printf("After Extraction tmpdir = %v\n", tempDirPath)
+	// for _, file := range dirs {
+	// 	fmt.Printf("file = name = %v , isDir = %v\n", file.Name(), file.IsDir())
+	// }
+
+	// time.Sleep(1 * time.Second)
+
+	// dirs, err = ioutil.ReadDir(tempDirPath)
+	// handleErr("read tempDirPath", err)
+	// for _, file := range dirs {
+	// 	fmt.Printf("After extract file = name = %v , isDir = %v\n", file.Name(), file.IsDir())
+	// }
 
 	// 3. chroot to temp dir
 	if err := syscall.Chroot(tempDirPath); err != nil {
 		fmt.Printf("Chroot - Err: %v\n", err)
 		os.Exit(1)
 	}
+
+	// handleErr("chdir", syscall.Chdir("/"))
 
 	cmd := exec.Command(command, args...)
 	// cmd.Stdin = os.Stdin // to ensure no err on cmd.Run()
@@ -99,6 +131,14 @@ func main() {
 			os.Exit(1)
 		}
 	}
+
+	//output, err := cmd.Output()
+	//if err != nil {
+	//	fmt.Printf("Err: %v", err)
+	//	os.Exit(1)
+	//}
+	//
+	//fmt.Println(string(output))
 
 }
 
@@ -152,21 +192,13 @@ type DokcerClient struct {
 func (dockerClient DokcerClient) AuthToken() (string, error) {
 
 	//auth := base64.StdEncoding.EncodeToString([]byte(username + ":" + password))
-	req, err := http.NewRequest("GET", "https://auth.docker.io/token?service=registry.docker.io&scope=repository:"+dockerClient.imageName+":pull", nil)
-	if err != nil {
-		return "", err
-	}
-	//req.Header.Add("Authorization", "Basic "+auth)
-	resp, err := dockerClient.httpClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
+
 	var result map[string]interface{}
+	body, err := doGet(dockerClient, "https://auth.docker.io/token?service=registry.docker.io&scope=repository:"+dockerClient.imageName+":pull", "")
+
+	if err != nil {
+		return "", err
+	}
 	err = json.Unmarshal(body, &result)
 	if err != nil {
 		return "", err
@@ -177,71 +209,51 @@ func (dockerClient DokcerClient) AuthToken() (string, error) {
 	return token, err
 }
 
-func (dockerClient DokcerClient) ImageIndexFile() (DokcerManifest, error) {
-	req, err := http.NewRequest("GET", "https://registry.hub.docker.com/v2/"+dockerClient.imageName+"/manifests/"+dockerClient.imageTag, nil)
-	if err != nil {
-		return DokcerManifest{}, err
-	}
-	req.Header.Add("Authorization", "Bearer "+dockerClient.token)
-	req.Header.Add("Accept", "application/vnd.oci.image.index.v1+json")
+func (dockerClient DokcerClient) ImageIndexFile() (ImageIndex, error) {
+	var result ImageIndex
+	body, err := doGet(dockerClient, "https://registry.hub.docker.com/v2/"+dockerClient.imageName+"/manifests/"+dockerClient.imageTag, "application/vnd.oci.image.index.v1+json")
 
-	resp, err := dockerClient.httpClient.Do(req)
 	if err != nil {
-		return DokcerManifest{}, err
+		return ImageIndex{}, err
 	}
-	defer resp.Body.Close()
 
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return DokcerManifest{}, err
-	}
-	var result DokcerManifest
 	err = json.Unmarshal(body, &result)
 	if err != nil {
-		return DokcerManifest{}, err
+		return ImageIndex{}, err
 	}
 
-	fmt.Printf("index file %v\n", string(body))
+	fmt.Printf("image index file %v\n", string(body))
 
 	return result, nil
 }
 
-func (dockerClient DokcerClient) DigestManifestFile(manifest Manifest) (V2DigestManifest, error) {
-	req, err := http.NewRequest("GET", "https://registry.hub.docker.com/v2/"+dockerClient.imageName+"/manifests/"+manifest.Digest, nil)
-	if err != nil {
-		return V2DigestManifest{}, err
-	}
-	req.Header.Add("Authorization", "Bearer "+dockerClient.token)
-	req.Header.Add("Accept", manifest.MediaType)
-
-	resp, err := dockerClient.httpClient.Do(req)
-	if err != nil {
-		return V2DigestManifest{}, err
-	}
-	defer resp.Body.Close()
-
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return V2DigestManifest{}, err
-	}
+func (dockerClient DokcerClient) DigestManifestFile(digest, mediaType string) (V2DigestManifest, error) {
 	var result V2DigestManifest
+	body, err := doGet(dockerClient, "https://registry.hub.docker.com/v2/"+dockerClient.imageName+"/manifests/"+digest, mediaType)
+
+	if err != nil {
+		return V2DigestManifest{}, err
+	}
+
 	err = json.Unmarshal(body, &result)
 	if err != nil {
 		return V2DigestManifest{}, err
 	}
 
+	fmt.Printf("DigestManifestFile file %v\n", string(body))
+
 	return result, nil
 }
 
-func (dockerClient DokcerClient) PullAndExtractLayer(tempDirPath string, layer Layer) error {
+func (dockerClient DokcerClient) PullAndExtractLayer(tempDirPath, layerDigest, mediaType string) error {
 	//GET /v2/<name>/blobs/<digest>
-	fmt.Printf("Pulling layer :%v\n", layer.Digest)
-	req, err := http.NewRequest("GET", "https://registry.hub.docker.com/v2/"+dockerClient.imageName+"/blobs/"+layer.Digest, nil)
+	fmt.Printf("Pulling layer :%v\n", layerDigest)
+	req, err := http.NewRequest("GET", "https://registry.hub.docker.com/v2/"+dockerClient.imageName+"/blobs/"+layerDigest, nil)
 	if err != nil {
 		return err
 	}
 	req.Header.Add("Authorization", "Bearer "+dockerClient.token)
-	req.Header.Add("Accept", layer.MediaType)
+	req.Header.Add("Accept", mediaType)
 
 	// download layer
 	resp, err := dockerClient.httpClient.Do(req)
@@ -250,7 +262,7 @@ func (dockerClient DokcerClient) PullAndExtractLayer(tempDirPath string, layer L
 	}
 	defer resp.Body.Close()
 
-	hash := strings.Split(layer.Digest, ":")[1]
+	hash := strings.Split(layerDigest, ":")[1]
 
 	file, err := os.Create(hash + ".tar.gz")
 
@@ -264,7 +276,7 @@ func (dockerClient DokcerClient) PullAndExtractLayer(tempDirPath string, layer L
 	}
 
 	// extract file
-	fmt.Printf("Extracting layer :%v\n", layer.Digest)
+	fmt.Printf("Extracting layer :%v\n", layerDigest)
 	cmd := exec.Command("tar", "-xzf", (hash + ".tar.gz"), "-C", tempDirPath)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
@@ -276,10 +288,42 @@ func (dockerClient DokcerClient) PullAndExtractLayer(tempDirPath string, layer L
 
 }
 
-type DokcerManifest struct {
+func doGet(dockerClient DokcerClient, uri string, mediaType string) ([]byte, error) {
+	fmt.Printf("URL %v, mediaType = %v\n", uri, mediaType)
+	req, err := http.NewRequest("GET", uri, nil)
+	if err != nil {
+		return []byte{}, err
+	}
+	// when need to get token
+	if dockerClient.token != "" {
+		req.Header.Add("Authorization", "Bearer "+dockerClient.token)
+		req.Header.Add("Accept", mediaType)
+	}
+
+	resp, err := dockerClient.httpClient.Do(req)
+	fmt.Printf("StatusCode = %v\n", resp.Status)
+	if err != nil {
+		return []byte{}, err
+	}
+	defer resp.Body.Close()
+
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return []byte{}, err
+	}
+
+	return body, nil
+}
+
+type ImageIndex struct {
 	Manifests     []Manifest `json:"manifests"`
+	FSLayers      []FSLayer  `json:"fsLayers"`
 	MediaType     string     `json:"mediaType"`
 	SchemaVersion int        `json:"schemaVersion"`
+}
+
+type FSLayer struct {
+	BlobSum string `json:"blobSum"`
 }
 
 type Manifest struct {
@@ -294,6 +338,48 @@ type Manifest struct {
 type Config struct {
 	Layer
 }
+
+/*/
+apline:linix image index file
+{
+	"schemaVersion": 1,
+	"name": "library/alpine",
+	"tag": "latest",
+	"architecture": "amd64",
+	"fsLayers": [
+	   {
+		  "blobSum": "sha256:a3ed95caeb02ffe68cdd9fd84406680ae93d633cb16422d00e8a7c22955b46d4"
+	   },
+	   {
+		  "blobSum": "sha256:8a49fdb3b6a5ff2bd8ec6a86c05b2922a0f7454579ecc07637e94dfd1d0639b6"
+	   }
+	],
+	"history": [
+	   {
+		  "v1Compatibility": "{\"architecture\":\"amd64\",\"config\":{\"Hostname\":\"\",\"Domainname\":\"\",\"User\":\"\",\"AttachStdin\":false,\"AttachStdout\":false,\"AttachStderr\":false,\"Tty\":false,\"OpenStdin\":false,\"StdinOnce\":false,\"Env\":[\"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\"],\"Cmd\":[\"/bin/sh\"],\"Image\":\"sha256:fa9de512065d701938f44d4776827d838440ed00f1f51b1fff5f97f7378acf08\",\"Volumes\":null,\"WorkingDir\":\"\",\"Entrypoint\":null,\"OnBuild\":null,\"Labels\":null},\"container\":\"0aa41c99f485b1dbe59101f2bb8e6922d9bf7cc1745f1c768f988b1bd724f11a\",\"container_config\":{\"Hostname\":\"0aa41c99f485\",\"Domainname\":\"\",\"User\":\"\",\"AttachStdin\":false,\"AttachStdout\":false,\"AttachStderr\":false,\"Tty\":false,\"OpenStdin\":false,\"StdinOnce\":false,\"Env\":[\"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\"],\"Cmd\":[\"/bin/sh\",\"-c\",\"#(nop) \",\"CMD [\\\"/bin/sh\\\"]\"],\"Image\":\"sha256:fa9de512065d701938f44d4776827d838440ed00f1f51b1fff5f97f7378acf08\",\"Volumes\":null,\"WorkingDir\":\"\",\"Entrypoint\":null,\"OnBuild\":null,\"Labels\":{}},\"created\":\"2023-05-09T23:11:10.132147526Z\",\"docker_version\":\"20.10.23\",\"id\":\"9b53e1d18b8ca6d05f261f41688f674879603cd2160c4e9ded4c7a7b93baa591\",\"os\":\"linux\",\"parent\":\"149414ad771db6217a7e94adc1a8a85f96ba1b8a7deed38f48f22ee1b82e459b\",\"throwaway\":true}"
+	   },
+	   {
+		  "v1Compatibility": "{\"id\":\"149414ad771db6217a7e94adc1a8a85f96ba1b8a7deed38f48f22ee1b82e459b\",\"created\":\"2023-05-09T23:11:10.007217553Z\",\"container_config\":{\"Cmd\":[\"/bin/sh -c #(nop) ADD file:7625ddfd589fb824ee39f1b1eb387b98f3676420ff52f26eb9d975151e889667 in / \"]}}"
+	   }
+	],
+	"signatures": [
+	   {
+		  "header": {
+			 "jwk": {
+				"crv": "P-256",
+				"kid": "DA66:MSF3:PU24:76KK:UP6N:H7TR:CVDC:C55Z:GAMM:2GKK:FXTW:CYBL",
+				"kty": "EC",
+				"x": "XuooKKbEO6caj7IL4oeRNqBKmhpUQ-_eY4fHIBU9SMg",
+				"y": "Fa1jgKNRKQovoI4_E4rF5HCSA8LfXetOdTwdl1Gi99E"
+			 },
+			 "alg": "ES256"
+		  },
+		  "signature": "WNZyvIWAr1fY90RpI4moBZbzCYbFykc8_XBbd83t8Kt_i1TzG7vn5xPr-q74H_AKNSmpJe-wlnxESiGt6hPVUw",
+		  "protected": "eyJmb3JtYXRMZW5ndGgiOjIwOTcsImZvcm1hdFRhaWwiOiJDbjAiLCJ0aW1lIjoiMjAyMy0wNS0xOFQxMDo0MDoyNloifQ"
+	   }
+	]
+ }
+//*/
 
 // type: application/vnd.oci.image.index.v1+json
 /*
