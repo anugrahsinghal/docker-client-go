@@ -2,6 +2,19 @@
 
 package main
 
+/*/
+thoughts:
+
+- mac needs VM/QEMU so that it can mock the LINUS FS and thus can execute linux commands seamlessly
+- what docker maybe does is that 
+uses linux system calls
+to create a seprate enviroment
+cgroups are helpful here: they help isolate/limit resource usage between 2 env
+
+a container is basically a full blown linux FS mounted at a different folder and nothing else
+
+//*/
+
 import (
 	"encoding/json"
 	"fmt"
@@ -148,7 +161,13 @@ func main() {
 func getImageInfo(dockerImage string) (string, string) {
 	image := strings.Split(dockerImage, ":")
 	imageName := "library/" + image[0]
-	imageTag := image[1]
+	
+	var imageTag string
+	if(len(image) != 2) {
+		imageTag = "latest"
+	} else {
+		imageTag = image[1]
+	}
 	fmt.Printf("Docker %v\n", image)
 	return imageName, imageTag
 }
