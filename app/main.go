@@ -3,7 +3,7 @@
 package main
 
 /*/
-thoughts:
+hypothesis:
 
 - mac needs VM/QEMU so that it can mock the LINUS FS and thus can execute linux commands seamlessly
 - what docker maybe does is that 
@@ -11,7 +11,7 @@ uses linux system calls
 to create a seprate enviroment
 cgroups are helpful here: they help isolate/limit resource usage between 2 env
 
-a container is basically a full blown linux FS mounted at a different folder and nothing else
+a container is basically a full blown linux FS mounted at a different folder and nothing else ?
 
 //*/
 
