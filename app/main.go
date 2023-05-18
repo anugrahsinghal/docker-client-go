@@ -3,8 +3,6 @@
 package main
 
 import (
-	// "archive/tar"
-	// "compress/gzip"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -15,7 +13,6 @@ import (
 	"path"
 	"strings"
 	"syscall"
-	// "time"
 )
 
 func handleErr(msg string, err error) {
@@ -25,20 +22,6 @@ func handleErr(msg string, err error) {
 	}
 }
 
-//{
-//	[
-//		{{sha256:ca5534a51dd04bbcebe9b23ba05f389466cf0c190f1f8f182d7eea92a9671d00 application/vnd.oci.image.manifest.v1+json 424} {amd64 linux }}
-//		{{sha256:2faed463fb00a57a51cc1fe0e0884d46eacac8e7784ca7a93c3e861661d3e752 application/vnd.oci.image.manifest.v1+json 424} {arm linux v7}}
-//		{{sha256:6f8fe7bff0bee25c481cdc26e28bba984ebf72e6152005c18e1036983c01a28b application/vnd.oci.image.manifest.v1+json 424} {arm64 linux v8}}
-//		{{sha256:93fbac516e3f64e076e953306215d0a05e691e8350bf7c2e6b600ed2678990e5 application/vnd.oci.image.manifest.v1+json 424} {ppc64le linux }}
-//		{{sha256:6f86459a9bb50cb27768ad53ba78d6f02612bbf7f1efeb513569bd2160c76834 application/vnd.oci.image.manifest.v1+json 424} {s390x linux }}
-//	]
-//	application/vnd.oci.image.index.v1+json
-//	2
-//}
-
-// mydocker run ubuntu:latest /usr/local/bin/docker-explorer echo hey
-// mydocker run ubuntu:latest /bin/echo hey
 // Usage: your_docker.sh run <image> <command> <arg1> <arg2> ...
 func main() {
 	dockerImage := os.Args[2]
@@ -72,14 +55,6 @@ func main() {
 
 	fmt.Printf("Args: %v\n", os.Args)
 
-	// dirs, err := ioutil.ReadDir(tempDirPath)
-	// handleErr("", err)
-	// fmt.Printf("Before extract tmpdir = %v\n", tempDirPath)
-	// for _, file := range dirs {
-	// 	fmt.Printf("file = name = %v , isDir = %v\n", file.Name(), file.IsDir())
-
-	// }
-
 	if imageIndexFile.SchemaVersion == 2 {
 		v2digestManifest, err := dockerClient.DigestManifestFile(imageIndexFile.Manifests[0])
 		handleErr("DigestManifestFile", err)
@@ -95,28 +70,12 @@ func main() {
 	err = createDevNull(tempDirPath)
 	handleErr("createDevNull", err)
 
-	// dirs, err := ioutil.ReadDir(tempDirPath)
-	// dirs, err = ioutil.ReadDir(tempDirPath)
-	// handleErr("", err)
-	// fmt.Printf("After Extraction tmpdir = %v\n", tempDirPath)
-	// for _, file := range dirs {
-	// 	fmt.Printf("file = name = %v , isDir = %v\n", file.Name(), file.IsDir())
-	// }
-
-	// time.Sleep(1 * time.Second)
-	// dirs, err = ioutil.ReadDir(tempDirPath)
-	// handleErr("read tempDirPath", err)
-	// for _, file := range dirs {
-	// 	fmt.Printf("After extract file = name = %v , isDir = %v\n", file.Name(), file.IsDir())
-	// }
 
 	// 3. chroot to temp dir
 	if err := syscall.Chroot(tempDirPath); err != nil {
 		fmt.Printf("Chroot - Err: %v\n", err)
 		os.Exit(1)
 	}
-
-	// handleErr("chdir", syscall.Chdir("/"))
 
 	cmd := exec.Command(command, args...)
 	// cmd.Stdin = os.Stdin // to ensure no err on cmd.Run()
@@ -140,14 +99,6 @@ func main() {
 			os.Exit(1)
 		}
 	}
-
-	//output, err := cmd.Output()
-	//if err != nil {
-	//	fmt.Printf("Err: %v", err)
-	//	os.Exit(1)
-	//}
-	//
-	//fmt.Println(string(output))
 
 }
 
