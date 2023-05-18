@@ -13,6 +13,15 @@ cgroups are helpful here: they help isolate/limit resource usage between 2 env
 
 a container is basically a full blown linux FS mounted at a different folder and nothing else ?
 
+- layers are  tar files
+they stack on top of each other
+
+this is also why docker do not need to resend layers with same sha sum
+
+because since the TAR is already present, does not need to send again
+
+*/
+
 //*/
 
 import (
@@ -37,6 +46,7 @@ func handleErr(msg string, err error) {
 
 // mydocker run ubuntu:latest /usr/local/bin/docker-explorer echo hey
 // mydocker run ubuntu:latest /bin/echo hey
+// go run app/main.go "-" alpine /bin/sh -c '/bin/ls /' # on gitpod
 // Usage: your_docker.sh run <image> <command> <arg1> <arg2> ...
 func main() {
 	dockerImage := os.Args[2]
